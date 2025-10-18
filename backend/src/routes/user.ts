@@ -2,6 +2,7 @@ import { withAccelerate } from "@prisma/extension-accelerate";
 import { Hono } from "hono";
 import { PrismaClient } from "../generated/prisma/edge";
 import { sign, verify } from "hono/jwt";
+import { signupInput, signinInput } from "@batxdev/medium-common";
 
 export const userRouter = new Hono<{
   Bindings: {
@@ -11,13 +12,21 @@ export const userRouter = new Hono<{
 }>();
 
 userRouter.post("/signup", async (c) => {
-  const prisma = new PrismaClient({
-    datasourceUrl: c.env.DATABASE_URL,
-  }).$extends(withAccelerate());
-
-  const body = await c.req.json();
-
   try {
+    const prisma = new PrismaClient({
+      datasourceUrl: c.env.DATABASE_URL,
+    }).$extends(withAccelerate());
+
+    const body = await c.req.json();
+    const {success} = signupInput.safeParse(body);
+    if(!success){
+      c.status(411);
+      return c.json({
+        message: "Inputs invalid"
+      })
+    }
+    //sanatize the body
+
     const user = await prisma.user.create({
       data: {
         email: body.email,
@@ -27,21 +36,31 @@ userRouter.post("/signup", async (c) => {
     const jwt = await sign({ id: user.id }, c.env.JWT_SECRET);
     return c.json({ jwt });
   } catch (e: any) {
+    // Log error for debugging
     if (e.code === 'P2002') {
       c.status(403);
       return c.json({ error: "User already exists" });
     }
-    throw e;
+    c.status(500);
+    return c.json({ error: "Internal server error" });
   }
 });
 
 userRouter.post("/signin", async(c) => {
-  const prisma = new PrismaClient({
-    datasourceUrl: c.env.DATABASE_URL,
-  }).$extends(withAccelerate());
+  try {
+    const prisma = new PrismaClient({
+      datasourceUrl: c.env.DATABASE_URL,
+    }).$extends(withAccelerate());
 
-  try{
     const body = await c.req.json();
+    const {success} = signinInput.safeParse(body);
+    if(!success){
+      c.status(411);
+      return c.json({
+        message: "Inputs invalid"
+      })
+    }
+
     const user = await prisma.user.findUnique({
       where : {
         email : body.email,
@@ -59,10 +78,8 @@ userRouter.post("/signin", async(c) => {
     return c.json({ jwt });
   }
   catch(e: any){
-    if(e.code === 'P2002'){
-      c.status(403);
-      return c.json({error: "Invalid credentials"});
-    }
-    throw e;
+    // Log error for debugging
+    c.status(500);
+    return c.json({error: "Internal server error"});
   }
 });
